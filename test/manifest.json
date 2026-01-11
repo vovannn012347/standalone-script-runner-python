@@ -1,0 +1,15 @@
+{
+  "script_id": "glaucoma-retinal-analyzer",
+  "artifact_hash_id": "",
+  "version": "1.0.0",
+  "processor_version": "1.0.0",
+  "entry_point": "test_user.py",
+  "input_arguments_mapping": [
+  ],
+  "outputs_definition_mapping": [
+    { "position": 1, "type": "output_file", "disk_path": "retinal-result.json", "label": "out-file-result" }
+  ],
+  "metrics": {
+	"accuracy" : 0.96
+  }
+}

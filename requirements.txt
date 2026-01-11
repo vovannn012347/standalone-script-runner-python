@@ -1,0 +1,14 @@
+torch==2.3.0
+torchvision==0.18.0
+numpy==1.26.4
+pandas==2.2.2
+opencv-python==4.9.0.80
+sympy~=1.14.0
+setuptools~=65.5.0
+packaging~=25.0
+fsspec~=2025.10.0
+pillow~=12.0.0
+
+# --- Build Tool ---
+# It's good practice to lock Nuitka's version too
+nuitka==2.2

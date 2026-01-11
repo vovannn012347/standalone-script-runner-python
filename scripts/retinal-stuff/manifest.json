@@ -1,0 +1,23 @@
+{
+  "script_id": "glaucoma-retinal-analyzer",
+  "artifact_hash_id": "",
+  "version": "1.0.0",
+  "processor_version": "1.0.0",
+  "entry_point": "glaucoma_classify_batch.py",
+  "input_arguments_mapping": [
+    { "position": 1, "type": "script_file", "disk_path" : "retinal_utils.py", "label": "retinal_utils"  },
+    { "position": 2, "type": "script_file", "disk_path" : "retina_classifier_networks.py", "label": "retina_classifier_networks"  },
+    { "position": 3, "type": "script_file", "disk_path" : "retina_nerve_definitor.py", "label": "retina_nerve_definitor" },
+    { "position": 4, "type": "script_file", "disk_path" : "retina_nerve_classifier.py", "label": "retina_nerve_classifier" },
+    { "position": 5, "type": "input_file", "disk_path" : "glaucoma-states.pth", "label":"definitor_model" },
+    { "position": 6, "type": "input_file", "disk_path" : "glaucoma-states.pth", "label":"classifier_model" },
+    { "position": 7, "type": "input_folder", "label" : "retinal_images" }
+  ],
+  "outputs_definition_mapping": [
+    { "type": "output_folder", "disk_path": "retinal-masks", "label": "out_masks" },
+    { "type": "output_file", "disk_path": "retinal-result.json", "label": "out-file-result" }
+  ],
+  "metrics": {
+	"accuracy" : 0.96
+  }
+}
