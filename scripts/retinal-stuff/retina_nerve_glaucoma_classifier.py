@@ -1,76 +1,84 @@
-import argparse
 import os
-
 import torch
 import torchvision.transforms as T
 from torchvision.transforms import InterpolationMode
 import pandas as pd
 
+# Import provided model and utilities
 from retina_classifier_networks import HandmadeGlaucomaClassifier
 from retinal_utils import open_image
 
-parser = argparse.ArgumentParser(description='Test retina glaucoma detection')
-parser.add_argument("--pretrained", type=str,
-                    default="training-data/retina-stuff-classifier/checkpoints/states.pth",
-                    help="path to the checkpoint file")
+# Constants matching definitor logic and network requirements
+IMG_SHAPES = [576, 576, 3]
+LOAD_MODE = "RGB"
+DATA_LABELS_ORDERED = ['glaucoma', 'atrophy', 'valid_image']
+MODEL_BASE = 64
 
-parser.add_argument("--image", type=str,
+def load_classifier(weights_pretrained_path, use_cuda=True):
+    """
+    Loads the HandmadeGlaucomaClassifier model using the specific state_dict
+    structure found in training checkpoints.
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() and use_cuda else 'cpu')
 
-                    default="training-data/retina-stuff-classifier/nerves_defined_output/1171_left_cropped.jpg",
-                    help="path to the image file")
-parser.add_argument("--out-result", type=str,
-                    default="training-data/retina-stuff-classifier/nerves_classify_output/1171_left.csv",
-                    help="path to the output result file")
+    # Load the full state dict
+    state_dicts = torch.load(weights_pretrained_path, map_location=device)
 
-img_shapes = [576, 576, 3]
-load_mode = "RGB"
-data_labels_ordered = ['glaucoma', 'atrophy', 'valid_image']
-
-
-def main():
-
-    args = parser.parse_args()
-
-    if not os.path.exists(os.path.dirname(args.out_result)):
-        os.makedirs(os.path.dirname(args.out_result))
-
-    # set up network
-    use_cuda_if_available = False
-    device = torch.device('cuda' if torch.cuda.is_available() and use_cuda_if_available else 'cpu')
-    convolution_state_dict = torch.load(args.pretrained,
-                                        map_location=torch.device('cpu'))
-
+    # Initialize model (Note: input_size is half of original 576 as per your logic)
     classifier = HandmadeGlaucomaClassifier(
-        input_size=img_shapes[0]/2,
-        num_classes=data_labels_ordered.__len__()).to(device)
+        input_size=int(IMG_SHAPES[0] / 2),
+        num_classes=len(DATA_LABELS_ORDERED),
+        base=MODEL_BASE
+    ).to(device)
 
-    classifier.load_state_dict(convolution_state_dict['nerve_classifier'])
+    # Access the specific key used in your save utility
+    if 'nerve_classifier' in state_dicts:
+        classifier.load_state_dict(state_dicts['nerve_classifier'])
+    else:
+        # Fallback for raw state dicts
+        classifier.load_state_dict(state_dicts)
 
-    print(f"input file at: {args.image}")
+    classifier.eval()
+    return classifier, device
 
-    pil_image_origin = open_image(args.image)
 
-    tensor_image = T.ToTensor()(pil_image_origin)
-    tensor_image = T.Resize(tuple([int(img_shapes[0]/2), int(img_shapes[1]/2)]),
-                            antialias=True,
-                            interpolation=InterpolationMode.BILINEAR)(tensor_image)
+def run_classifier(image_path, loaded_classifier, premade_device):
+    """
+    Runs classification on a single cropped nerve image.
+    Returns a dictionary of labels and their rounded probabilities.
+    """
+    # 1. Loading and Pre-processing
+    pil_image_origin = open_image(image_path, load_mode=LOAD_MODE)
 
-    tensor_image.mul_(2).sub_(1)  # [0, 1] -> [-1, 1]
+    # 2. Tensor conversion and scaling (Matching the 0.5 scale factor)
+    transform_pipeline = T.Compose([
+        T.ToTensor(),
+        T.Resize(
+            (int(IMG_SHAPES[0] / 2), int(IMG_SHAPES[1] / 2)),
+            antialias=True,
+            interpolation=InterpolationMode.BILINEAR
+        )
+    ])
+
+    tensor_image = transform_pipeline(pil_image_origin).to(premade_device)
+
+    # Normalize [0, 1] -> [-1, 1]
+    tensor_image.mul_(2).sub_(1)
+
+    # Ensure 3-channel (RGB) if single-channel input
     if tensor_image.size(0) == 1:
         tensor_image = torch.cat([tensor_image] * 3, dim=0)
 
+    # 3. Inference
     tensor_image = tensor_image.unsqueeze(0)
-    output = classifier(tensor_image).squeeze(0)
+    with torch.no_grad():
+        output = loaded_classifier(tensor_image).squeeze(0)
 
-    data = pd.DataFrame(output.detach().numpy().reshape(1, -1), columns=data_labels_ordered)
+    # 4. Result formatting
+    # Convert to CPU numpy for DataFrame compatibility
+    output_np = output.detach().cpu().numpy().reshape(1, -1)
+    data = pd.DataFrame(output_np, columns=DATA_LABELS_ORDERED)
     data = data.round(5)
 
-    '''for col in data.columns:
-        data[col] = data[col].apply(lambda x: f'{x:.40f}')'''
-
-    # pd.options.display.float_format = '{:.40f}'.format
-    data.to_csv(args.out_result, index=False)
-
-if __name__ == '__main__':
-    main()
-
+    # Return as a dictionary for easier orchestration in batch processing
+    return data.to_dict(orient='records')[0]

@@ -1,0 +1,32 @@
+{
+  "script_id": "glaucoma-retinal-analyzer",
+  "artifact_hash_id": "",
+  "version": "0.8.0",
+  "processor_version": "1.0.0",
+  "entry_point": "glaucoma_classify_batch.py",
+  "inputs_mapping": [
+    { "position": 1, "type": "script_file", "disk_path" : "retinal_utils.py", "label": "retinal_utils"  },
+    { "position": 2, "type": "script_file", "disk_path" : "retina_classifier_networks.py", "label": "retina_classifier_networks"  },
+    { "position": 3, "type": "script_file", "disk_path" : "retina_nerve_definitor.py", "label": "retina_nerve_definitor" },
+    { "position": 4, "type": "script_file", "disk_path" : "retina_nerve_glaucoma_classifier.py", "label": "retina_nerve_glaucoma_classifier" },
+    { "position": 5, "type": "source_file", "disk_path" : "definitor_states_16.pth", "label":"definitor_model" },
+    { "position": 6, "type": "source_file", "disk_path" : "classifier_states_16.pth", "label":"classifier_model" },
+    { "position": 7, "type": "folder", "label" : "retinal_images" }
+  ],
+  "outputs_mapping": [
+    { "type": "folder", "disk_path": "retinal_masks/images", "label": "retinal_masks_images" },
+    { "type": "folder", "disk_path": "retinal_masks/info", "label": "retinal_masks_info" },
+    { "type": "file", "disk_path": "retinal_result.json", "label": "retinal_classify_result" }
+  ],
+  "orchestrator_input_mapping": [
+    { "type": "folder", "label_param": "retinal_images", "text_label": "vovikus.retinal_images" }
+  ],
+  "orchestrator_output_mapping": [
+    { "type": "folder", "label_param": "retinal_masks_images", "text_label": "vovikus.retinal_masks_images"  },
+    { "type": "folder", "label_param": "retinal_masks_info", "text_label": "vovikus.retinal_masks_info"  },
+    { "type": "file", "label_param": "retinal_classify_result", "text_label": "vovikus.retinal_classify_result"  }
+  ],
+  "metrics": {
+	"accuracy" : 0.96
+  }
+}

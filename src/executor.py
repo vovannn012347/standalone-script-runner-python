@@ -1,7 +1,8 @@
 import sys
 import json
-import importlib.util  # Fixed: Must be explicitly imported for .util
+import importlib.util
 import os
+import argparse
 import re
 
 
@@ -13,97 +14,194 @@ def validate_path_safety(path):
     return os.path.abspath(path)
 
 
-def load_manifest(manifest_path):
-    with open(manifest_path, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-
-if len(sys.argv) < 2:
-    sys.exit(1)
-
-manifest_path = validate_path_safety(sys.argv[1])
-manifest = load_manifest(manifest_path)
-
-provided_args = sys.argv[2:]
-raw_cli_override = {provided_args[i].lstrip('-'): provided_args[i+1] 
-                    for i in range(0, len(provided_args), 2) if i+1 < len(provided_args)}
-
-input_map = {}
-output_map = {}
-
-mappings = sorted(manifest.get("input_arguments_mapping", []), key=lambda x: x.get('position', 0))
-
-for mapping in mappings:
-    label = mapping.get("label")
-    m_type = mapping.get("type")
-    # Priority: CLI Override -> Manifest disk_path
-    path = validate_path_safety(raw_cli_override.get(label)) or validate_path_safety(mapping.get("disk_path"))
-
-    if not path and not mapping.get("optional", False):
-        print(f"Error: Required input '{label}' missing.")
-        sys.exit(1)
-
-    if path:
-        if m_type == 'input_directory':
-            if os.path.isdir(path):
-                input_map[label] = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
-            else:
-                input_map[label] = [] # Fallback for empty or missing dir
-        elif m_type == 'input_file':
-            input_map[label] = path
-        elif m_type == 'script_file':
-            # DYNAMIC IMPORT: Enable 'import label'
-            script_dir = os.path.dirname(path)
-            module_name = os.path.splitext(os.path.basename(path))[0]
-            
-            if script_dir not in sys.path:
-                sys.path.insert(0, script_dir)
-            
-            # Load module and inject into globals under the Label name
-            spec = importlib.util.spec_from_file_location(module_name, path)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            globals()[label] = mod # Key: script is now accessible by its LABEL
-            input_map[label] = path
-
-# --- 2. Resolve OUTPUTS (Dir & File) ---
-
-out_mappings = sorted(manifest.get("outputs_definition_mapping", []), key=lambda x: x.get('position', 0))
-for out_map in out_mappings:
-    label = out_map.get("label")
-    m_type = out_map.get("type")
-    path = validate_path_safety(raw_cli_override.get(label)) or validate_path_safety(out_map.get("disk_path"))
-
+def validate_path(path, base_dir=None):
+    """Joins relative paths with a base directory and ensures absolute paths."""
     if not path:
-        print(f"Error: Output '{label}' missing destination.")
+        return None
+    if not os.path.isabs(path) and base_dir:
+        path = os.path.join(base_dir, path)
+    return os.path.abspath(path)
+
+
+def load_json(path):
+    if path and os.path.exists(path):
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Standalone Script Executor")
+    parser.add_argument("--processing-dir", required=True, help="Task directory containing manifest and data")
+    args = parser.parse_args()
+
+    proc_dir = os.path.abspath(args.processing_dir)
+
+    # 1. Load processing artifacts from processing-dir
+    # processing_manifest considered safe, is constructed by the processing system
+    proc_manifest = load_json(os.path.join(proc_dir, "processing_manifest.json"))
+    # considered safe, no file path should be in here
+    direct_inputs = load_json(os.path.join(proc_dir, "direct_input.json"))
+
+    # 2. Locate and load script_manifest
+    script_root = proc_manifest.get("run-script")
+    if not script_root:
+        print("Error: 'run-script' not defined in processing_manifest.json")
         sys.exit(1)
 
-    if m_type == "output_dir":
-        os.makedirs(path, exist_ok=True)
-    elif m_type == "output_file":
-        # Ensure the parent directory exists for the output file
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-    
-    output_map[label] = path
+    # script_manifest paths are considered unsafe
+    script_manifest = load_json(os.path.join(script_root, "script_manifest.json"))
+    entry_point_name = script_manifest.get("entry_point")
+    entry_point_path = validate_path(entry_point_name, script_root)
 
-# --- 3. Execute Entry Point .process ---
-entry_path = validate_path_safety(manifest.get("entry_point"))
-if not entry_path or not os.path.exists(entry_path):
-    print(f"Error: Entry point script missing at {entry_path}")
-    sys.exit(1)
+    input_map = {}
+    output_map = {}
 
-spec = importlib.util.spec_from_file_location("entry_point", entry_path)
-entry_mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(entry_mod)
+    input_map.update(direct_inputs)
 
-try:
-    receipt = entry_mod.process(input_map, output_map)
-    
-    # Write result for C# Orchestrator
-    with open("process_receipt.json", "w", encoding='utf-8') as f:
-        json.dump(receipt, f, indent=4)
-except Exception as e:
-    # Record crash in the receipt
-    with open("process_receipt.json", "w", encoding='utf-8') as f:
-        json.dump({"status": "error", "message": str(e)}, f)
-    sys.exit(1)
+    # 3. Resolve Inputs
+    proc_inputs_base = proc_manifest.get("inputs_base", {})
+    for mapping in script_manifest.get("inputs_mapping", []):
+        label = mapping.get("label")
+        m_type = mapping.get("type")
+        path_relative_end = mapping.get("disk_path")
+
+        if not path_relative_end and not (mapping.get("optional", False) or proc_inputs_base[label]):
+            print(f"Error: Required input '{label}' missing.")
+            sys.exit(1)
+
+        validate_path_safety(path_relative_end)
+
+        # source_file, source_directory, script_file are not allowed
+        # to be overridden by inputs if path is provided
+
+        # if we have path_relative on file - means it is non-user input file
+        if m_type == "source_file":
+            if path_relative_end:
+                resolved_path = validate_path(path_relative_end, script_root)
+            else:
+                resolved_path = proc_inputs_base[label]
+            input_map[label] = resolved_path
+            continue
+
+        if m_type == "source_directory":
+            if path_relative_end:
+                resolved_path = validate_path(path_relative_end, script_root)
+            else:
+                resolved_path = proc_inputs_base[label]
+
+            if resolved_path and os.path.isdir(resolved_path):
+                input_map[label] = [os.path.join(resolved_path, f) for f in os.listdir(resolved_path) if
+                                    os.path.isfile(os.path.join(resolved_path, f))]
+            else:
+                input_map[label] = []
+            continue
+
+        if m_type == "script_file":
+            if path_relative_end:
+                mod_path = validate_path(path_relative_end, script_root)
+            else:
+                mod_path = proc_inputs_base[label]
+            spec = importlib.util.spec_from_file_location(label, mod_path)
+            mod = importlib.util.module_from_spec(spec)
+            sys.path.insert(0, os.path.dirname(mod_path))
+            spec.loader.exec_module(mod)
+            globals()[label] = mod
+            continue
+
+        if path_relative_end:
+            path_relative_start = proc_inputs_base[label]
+            if path_relative_start:
+                resolved_path = validate_path(path_relative_end,  path_relative_start)
+            else:
+                resolved_path = validate_path(path_relative_end,  proc_dir)
+        else:
+            resolved_path = proc_inputs_base[label]
+
+        if m_type == "folder":
+            if resolved_path and os.path.isdir(resolved_path):
+                input_map[label] = [os.path.join(resolved_path, f) for f in os.listdir(resolved_path) if
+                                    os.path.isfile(os.path.join(resolved_path, f))]
+            else:
+                input_map[label] = []
+            continue
+
+        if m_type == "file":
+            input_map[label] = resolved_path
+            continue
+
+    # 4. Resolve Outputs
+    proc_outputs_base = proc_manifest.get("outputs_base", {})
+    for out_mapping in script_manifest.get("outputs_mapping", []):
+        label = out_mapping.get("label")
+        m_type = out_mapping.get("type")
+        path_relative_end = out_mapping.get("disk_path")
+
+        # Ensure the path string itself doesn't contain illegal characters
+        validate_path_safety(path_relative_end)
+
+        # 1. Determine the Base Resolution Path
+        # Priority: proc_outputs mapping -> processing-dir
+        path_relative_start = proc_outputs_base.get(label)
+
+        if path_relative_end:
+            if path_relative_start:
+                resolved_path = validate_path(path_relative_end, path_relative_start)
+            else:
+                resolved_path = validate_path(path_relative_end, proc_dir)
+        else:
+            resolved_path = path_relative_start
+
+        # 2. Handle Directory/File Creation
+        if m_type == "folder":
+            if resolved_path:
+                # Create the directory if it does not exist
+                os.makedirs(resolved_path, exist_ok=True)
+
+                # Since this is an output folder mapping, we provide the path itself
+                # to the script so it knows where to write files.
+                output_map[label] = resolved_path
+            else:
+                output_map[label] = None
+            continue
+
+        if m_type == "file":
+            if resolved_path:
+                # Ensure the parent directory for the output file exists
+                parent_dir = os.path.dirname(resolved_path)
+                if parent_dir:
+                    os.makedirs(parent_dir, exist_ok=True)
+
+                output_map[label] = resolved_path
+            else:
+                output_map[label] = None
+            continue
+
+    # 5. Execute
+    spec = importlib.util.spec_from_file_location("main_entry", entry_point_path)
+    entry_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(entry_mod)
+
+    try:
+        process_result, direct_output, file_output = entry_mod.process(input_map, output_map)
+
+        output_result_path = os.path.join(proc_dir, "direct_output.json")
+        output_file_result_path = os.path.join(proc_dir, "file_output.json")
+
+        with open(output_result_path, "w", encoding='utf-8') as f:
+            json.dump(direct_output, f, indent=4)
+
+        with open(output_file_result_path, "w", encoding='utf-8') as f:
+            json.dump(file_output, f, indent=4)
+
+        with open(os.path.join(proc_dir, "script_summary.json"), "w", encoding='utf-8') as f:
+            json.dump(process_result, f, indent=4)
+
+    except Exception as e:
+        with open(os.path.join(proc_dir, "script_summary.json"), "w", encoding='utf-8') as f:
+            json.dump({"status": "error", "message": str(e)}, f, indent=4)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

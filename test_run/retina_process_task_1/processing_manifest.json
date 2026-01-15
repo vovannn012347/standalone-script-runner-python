@@ -1,0 +1,11 @@
+{
+    "run-script" : "D:\\Shared\\Kursova\\python-standalone-pyinstaller\\scripts\\retinal-stuff",
+    "inputs_base": {
+        "retinal_images" : "D:\\Shared\\Kursova\\python-standalone-pyinstaller\\test_run\\retina_process_task_1\\input_images"
+    },
+    "outputs_base": {
+        "retinal_masks_images" : "D:\\Shared\\Kursova\\python-standalone-pyinstaller\\test_run\\retina_process_task_1",
+        "retinal_masks_info" : "D:\\Shared\\Kursova\\python-standalone-pyinstaller\\test_run\\retina_process_task_1",
+        "retinal_classify_result" : "D:\\Shared\\Kursova\\python-standalone-pyinstaller\\test_run\\retina_process_task_1"
+    }
+}

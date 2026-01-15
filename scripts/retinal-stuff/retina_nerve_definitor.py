@@ -1,106 +1,138 @@
-import os.path
-import time
-
+import os
 import torch
 import torch.nn.functional as tochfunc
 import torchvision.transforms as tvtransf
 
-from retina_classifier_networks import FcnskipNerveDefinitor2
-from retinal_utils import open_image, get_bounding_box_fast,  get_bounding_box_rectanglified, \
-    extract_objects_with_contours_np_cv2, magic_wand_mask_selection_faster, apply_clahe_lab, \
-    histogram_equalization_hsv_s
+# Import provided model and utilities
+from retina_classifier_networks import FCNSkipNerveDefinitorPrunnable
+from retinal_utils import (
+    open_image, get_bounding_box_fast, get_bounding_box_rectanglified,
+    extract_objects_with_contours_np_cv2, magic_wand_mask_selection_faster,
+    apply_clahe_lab, histogram_equalization_hsv_s
+)
 
-img_shapes = [576, 576, 3]
-load_mode = "RGB"
-model_base = 64
+# Constants based on your provided config/test scripts
+IMG_SHAPES = [576, 576, 3]
+LOAD_MODE = "RGB"
+MODEL_BASE = 64
 
 
-def split_by_position(string, position):
-    return [string[:position], string[position:]]
+def load_definitor(weights_pretrained_path, use_cuda=True):
+    """
+    Loads the FcnskipNerveDefinitor2 model using the specific state_dict
+    structure found in the training/testing scripts.
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() and use_cuda else 'cpu')
 
+    # Load the full state dict
+    state_dicts = torch.load(weights_pretrained_path, map_location=device)
 
-def load_definitor(weights_pretrained_path):
-    use_cuda_if_available = False
-    device = torch.device('cuda' if torch.cuda.is_available() and use_cuda_if_available else 'cpu')
-
-    convolution_state_dict = torch.load(weights_pretrained_path, map_location=device)
-
-    loaded_definitor = FcnskipNerveDefinitor2(
+    # Initialize model matching your training setup
+    loaded_definitor = FCNSkipNerveDefinitorPrunnable(
         num_classes=1,
-        use_dropout=False,
-        base=model_base).to(device)
+        # use_dropout=False,  # Eval mode typically disables dropout
+        base=MODEL_BASE
+    ).to(device)
 
-    loaded_definitor.load_state_dict(convolution_state_dict['nerve_definitor'])
+    # Access the specific key used in your save_nerve_definitor utility
+    if 'nerve_definitor' in state_dicts:
+        loaded_definitor.load_state_dict(state_dicts['nerve_definitor'])
+    else:
+        # Fallback for raw state dicts
+        loaded_definitor.load_state_dict(state_dicts)
+
     loaded_definitor.eval()
-    return loaded_definitor
+    return loaded_definitor, device
 
 
-def run_definitor(image_path, output_path, loaded_definitor):  # , weights_pretrained_path = None):
+def run_definitor(image_path, output_path, loaded_definitor, premade_device):
+    """
+    Runs inference on a single image, processes the mask, and saves cropped results.
+    """
+    image_name = os.path.basename(image_path)
+    image_name_no_ext, image_ext = os.path.splitext(image_name)
 
-    # loaded_definitor = load_definitor(weights_pretrained_path)
+    # 1. Pre-processing pipeline
+    pil_image_origin = open_image(image_path, load_mode=LOAD_MODE)
 
-    image_name = os.path.basename(image_path)  # file name
-    image_name, image_ext = os.path.splitext(image_name)  # name and extension
-
-    pil_image_origin = open_image(image_path, load_mode=load_mode)  # Image.open(args.image).convert('RGB')  # 3 channel
-
-    # apply histogram equalization
+    # Image enhancement as requested in your snippet
     pil_image_processed = histogram_equalization_hsv_s(pil_image_origin)
     pil_image_processed = apply_clahe_lab(pil_image_processed)
     pil_image_processed = pil_image_processed.convert("L")
 
-    tensor_image = tvtransf.ToTensor()(pil_image_processed)
-    tensor_image = tvtransf.Resize(img_shapes[:2], antialias=True)(tensor_image)
-    pil_image_origin = pil_image_origin.resize(img_shapes[:2])
-    channels, h, w = tensor_image.shape
+    # 2. Tensor conversion and scaling
+    # Resize to base training size
+    transform_pipeline = tvtransf.Compose([
+        tvtransf.ToTensor(),
+        tvtransf.Resize(IMG_SHAPES[:2], antialias=True)
+    ])
 
-    # detection is done on scaled down image
-    tensor_image = tochfunc.interpolate(tensor_image.unsqueeze(0),
-                                        scale_factor=0.5,
-                                        mode='bilinear',
-                                        align_corners=False).squeeze(0)
+    tensor_image = transform_pipeline(pil_image_processed).to(premade_device)
+    pil_image_origin = pil_image_origin.resize(IMG_SHAPES[:2])
+    _, h, w = tensor_image.shape
 
-    tensor_image.mul_(2).sub_(1)  # [0, 1] -> [-1, 1]
-    if tensor_image.size(0) == 1: # single-channel -> RGB. redundant but just in case
-        tensor_image = torch.cat([tensor_image] * 3, dim=0)
+    # 3. Model Inference with 0.5 Interpolation (Match test_retina_nerve_definitor)
+    input_tensor = tensor_image.unsqueeze(0)
+    input_tensor = tochfunc.interpolate(
+        input_tensor,
+        scale_factor=0.5,
+        mode='bilinear',
+        align_corners=False
+    )
 
-    tensor_image = tensor_image.unsqueeze(0)
-    output = loaded_definitor(tensor_image).squeeze(0)
+    # Normalize [0, 1] -> [-1, 1]
+    input_tensor.mul_(2).sub_(1)
 
-    to_pil_transform = tvtransf.ToPILImage(mode='L')
+    # Ensure 3-channel if required by model (as per your snippet logic)
+    if input_tensor.size(1) == 1:
+        input_tensor = torch.cat([input_tensor] * 3, dim=1)
 
+    with torch.no_grad():
+        output = loaded_definitor(input_tensor).squeeze(0)
+
+    # 4. Mask Post-Processing
+    # Hard thresholding and Magic Wand refinement
     output[output < 0.09] = 0
-    # output = torch.clamp(output, 0.09, 1)
-    output_wand_selected = (magic_wand_mask_selection_faster(output, upper_multiplier=0.15, lower_multipleir=0.3)
-                              .to(torch.float32))
+    output_wand_selected = magic_wand_mask_selection_faster(
+        output,
+        upper_multiplier=0.15,
+        lower_multipleir=0.3
+    ).to(torch.float32)
 
-    channels_bb, h_bb, w_bb = output_wand_selected.shape
+    # 5. Object Extraction and Cropping
+    _, h_bb, w_bb = output_wand_selected.shape
     split_tensors = extract_objects_with_contours_np_cv2(output_wand_selected)
 
     out_filenames = []
+    expand_constant = 0.2
+
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
 
     for split_idx, tensor in enumerate(split_tensors):
+        img_bbox = get_bounding_box_fast(tensor)  # [left, top, right, bottom]
 
-        img_bbox = get_bounding_box_fast(tensor)  # left, top, right, bottom
-
-        expand_constant = 0.2
+        # Calculate expanded bounding box
         bb_w = img_bbox[2] - img_bbox[0]
         bb_h = img_bbox[3] - img_bbox[1]
-        img_bbox2 = (img_bbox[0] - bb_w * expand_constant) / w_bb, (img_bbox[1] - bb_h * expand_constant) / h_bb, (
-                    img_bbox[2] + bb_w * expand_constant) / w_bb, (img_bbox[3] + bb_h * expand_constant) / h_bb
-        img_bbox3 = max(img_bbox2[0], 0), max(img_bbox2[1], 0), min(img_bbox2[2], 1.0), min(img_bbox2[3], 1.0),
-        img_bbox4 = int(img_bbox3[0] * h), int(img_bbox3[1] * w), int(img_bbox3[2] * h), int(img_bbox3[3] * w)
 
-        img_bbox4 = get_bounding_box_rectanglified(img_bbox4, h, w)
+        # Normalize and clip
+        x1 = max((img_bbox[0] - bb_w * expand_constant) / w_bb, 0)
+        y1 = max((img_bbox[1] - bb_h * expand_constant) / h_bb, 0)
+        x2 = min((img_bbox[2] + bb_w * expand_constant) / w_bb, 1.0)
+        y2 = min((img_bbox[3] + bb_h * expand_constant) / h_bb, 1.0)
 
-        if (img_bbox4[2] - img_bbox4[0]) > 1 and (img_bbox4[3] - img_bbox4[1]) > 1:
-            pil_image_cropped = pil_image_origin.crop(img_bbox4)
-            # pil_image_cropped.save(args.out_cropped)
-            out_filename = f"{image_name}_cropped_{split_idx}{image_ext}"
-            image_cropped_path_out = os.path.join(output_path, out_filename)
-            pil_image_cropped.save(image_cropped_path_out)
-            out_filenames.append(out_filename)
+        # Scale back to original resolution
+        final_bbox = (int(x1 * w), int(y1 * h), int(x2 * w), int(y2 * h))
+        final_bbox = get_bounding_box_rectanglified(final_bbox, h, w)
+
+        # Valid crop check
+        if (final_bbox[2] - final_bbox[0]) > 1 and (final_bbox[3] - final_bbox[1]) > 1:
+            pil_image_cropped = pil_image_origin.crop(final_bbox)
+            out_filename = f"{image_name_no_ext}_cropped_{split_idx}{image_ext}"
+
+            save_path = os.path.join(output_path, out_filename)
+            pil_image_cropped.save(save_path)
+            out_filenames.append(save_path)
 
     return out_filenames
-
-
