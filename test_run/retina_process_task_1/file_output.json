@@ -1,10 +1,5 @@
 {
-    "retinal_masks_images": [
-        {
-            "source_file": "normal_HereditaryAD-optic-atrophy_hearc_120119_02.jpg",
-            "out_files": [
-                "0\\normal_HereditaryAD-optic-atrophy_hearc_120119_02_cropped_0.jpg"
-            ]
-        }
+    "nerve_crop": [
+        "0\\normal_HereditaryAD-optic-atrophy_hearc_120119_02_cropped_0.jpg"
     ]
 }

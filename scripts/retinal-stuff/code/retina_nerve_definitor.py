@@ -4,7 +4,7 @@ import torch.nn.functional as tochfunc
 import torchvision.transforms as tvtransf
 
 # Import provided model and utilities
-from retina_classifier_networks import FCNSkipNerveDefinitorPrunnable
+from retina_networks import FCNSkipNerveDefinitorPrunnable
 from retinal_utils import (
     open_image, get_bounding_box_fast, get_bounding_box_rectanglified,
     extract_objects_with_contours_np_cv2, magic_wand_mask_selection_faster,

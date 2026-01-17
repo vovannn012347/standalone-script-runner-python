@@ -1,4 +1,5 @@
 {
-    "status": "error",
-    "message": "[Errno 2] No such file or directory: 'D:\\\\Shared\\\\Kursova\\\\python-standalone-pyinstaller\\\\scripts\\\\retinal-stuff\\\\classifier_states_16.pth'"
+    "status": "success",
+    "message": "glaucoma: 1",
+    "errors": []
 }

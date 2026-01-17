@@ -319,9 +319,6 @@ class HandmadeGlaucomaClassifier(nn.Module):
                  input_size=128):
         super(HandmadeGlaucomaClassifier, self).__init__()
 
-        # Load pre-trained VGG16
-        # vgg = models.vgg16(pretrained=True)
-
         # Transfer weights from VGG16 for the first 4 blocks
         self.encoder1 = self._conv_block_2(input_channels, base)
         self.encoder2 = self._conv_block_2(base, base * 2)
@@ -398,35 +395,3 @@ class HandmadeGlaucomaClassifier(nn.Module):
         output = self.fc(flattened)
 
         return output
-
-    @staticmethod
-    def create_model(num_classes=1, input_channels=3, input_size=288):
-        # Load VGG-16 pretrained model
-        vgg16 = models.vgg16(weights=VGG16_Weights.DEFAULT)
-        vgg_features = list(vgg16.features.children())  # Extract VGG-16 feature blocks
-
-        # Create the custom model
-        model = HandmadeGlaucomaClassifier(num_classes=num_classes, input_channels=input_channels,
-                                           input_size=input_size)
-
-        # Map pretrained weights from VGG-16 to the custom model
-        vgg_layers = [
-            model.encoder1,  # Map first two VGG-16 blocks to encoder1
-            model.encoder2,  # Map next two VGG-16 blocks to encoder2
-            model.encoder3,  # Map next three VGG-16 blocks to encoder3
-            model.encoder4  # Map next three VGG-16 blocks to encoder4
-        ]
-
-        start_idx = 0
-        for i, encoder in enumerate(vgg_layers):
-            num_layers = len(list(encoder.children()))
-            for j in range(num_layers):
-                if isinstance(encoder[j], nn.Conv2d):
-                    encoder[j].weight.data = vgg_features[start_idx].weight.data.clone()
-                    encoder[j].bias.data = vgg_features[start_idx].bias.data.clone()
-                start_idx += 1
-            # include pooling - it is not included in encoder layer for skip connections
-            start_idx += 1
-
-        # Return the fully initialized model
-        return model
