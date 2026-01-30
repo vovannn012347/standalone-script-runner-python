@@ -1,0 +1,19 @@
+{
+  "job_id": "423FE0DC-AD6B-4F3A-9E66-9B6798F163EF",
+  "status": "Pending",
+  "steps": [
+    {
+      "sequence": 1,
+      "script_id": "glaucoma-retinal-analyzer-A5214FC8-1AFA-45F8-A211-A64B7D562F47",
+      "processing_id": "479E2259-E271-4FD4-BA9C-D1B702877C55",
+      "inputs": {
+        "test_value": "./423FE0DC-AD6B-4F3A-9E66-9B6798F163EF/direct_inputs.json",
+        "retinal_images": "./423FE0DC-AD6B-4F3A-9E66-9B6798F163EF/input_images"
+      },
+      "outputs": {
+        "retinal_masks_images": "./423FE0DC-AD6B-4F3A-9E66-9B6798F163EF",
+        "retinal_classify_result": "./423FE0DC-AD6B-4F3A-9E66-9B6798F163EF"
+      }
+    }
+  ]
+}

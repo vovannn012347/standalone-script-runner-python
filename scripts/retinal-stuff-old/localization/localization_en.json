@@ -1,0 +1,16 @@
+{
+  "glaucoma_retinal_analyzer": "glaucoma retinal analyzer",
+  "vovikus.retinal_images": "retinal images",
+  "vovikus.retinal_masks_images": "retinal cropped images",
+  "vovikus.retinal_classify_result": "retinal classify result",
+  "vovikus.test_value": "test_value",
+  "vovikus.retinal_glaucoma_count": "images with glaucoma count",
+  "vovikus.retinal_glaucoma_probability_0_1": "total atrophy probability",
+  "vovikus.retinal_atrophy_count": "images with atrophy count",
+  "vovikus.retinal_atrophy_probability_0_1": "total glaucoma probability",
+  "suspected_glaucoma": "suspected glaucoma",
+  "glaucoma": "glaucoma",
+  "suspected_atrophy": "suspected atrophy",
+  "atrophy": "atrophy",
+  "normal_retina": "normal retina"
+}

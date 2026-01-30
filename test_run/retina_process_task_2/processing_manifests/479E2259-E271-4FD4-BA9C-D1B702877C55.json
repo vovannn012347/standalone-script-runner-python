@@ -1,0 +1,14 @@
+{
+    "run-script" : "glaucoma-retinal-analyzer-A5214FC8-1AFA-45F8-A211-A64B7D562F47",
+    "status" : "pending",
+    "result_hash" : "",
+    "folder_base": "./423FE0DC-AD6B-4F3A-9E66-9B6798F163EF",
+    "inputs_base": {
+        "test_value" : "./423FE0DC-AD6B-4F3A-9E66-9B6798F163EF/direct_input.json",
+        "retinal_images" : "./423FE0DC-AD6B-4F3A-9E66-9B6798F163EF/input_images"
+    },
+    "outputs_base": {
+        "retinal_masks_images" : "./423FE0DC-AD6B-4F3A-9E66-9B6798F163EF",
+        "retinal_classify_result" : "./423FE0DC-AD6B-4F3A-9E66-9B6798F163EF"
+    }
+}
